@@ -1,23 +1,46 @@
-volatile char state;
-char prevState;
+enum btState {
+  softKill,
+  hardKill,
+  search,
+  searchEngage
+};
+
+volatile btState permission;
+btState lastPermission;
  
 void setup() {
- Serial.begin(9600); // Default connection rate for my BT module
- state = '0';
- prevState = '0';
+ Serial.begin(9600); // Default connection rate for our BT module
+ permission = softKill;
+ lastPermission = softKill;
  pinMode(13, OUTPUT);
 }
  
 void loop() {
-  if(Serial.available()>0)
-    state = Serial.read();
-  if(state == '1' && state != prevState) {
-    Serial.println("High");
+  if(permission == searchEngage && permission != lastPermission) {
     digitalWrite(13, HIGH);
   }
-  if(state == '0' && state != prevState) {
-    Serial.println("Low");
+  else if(permission == softKill && permission != lastPermission) {
     digitalWrite(13, LOW);
   }
-  prevState = state;
+  else if(permission == hardKill && permission != lastPermission) {
+    //Stop all immediately -- turn all states to off, polling style system since stop is important
+  }
+  else {
+    //We are in search state
+  }
+  lastPermission = permission;
+}
+
+void serialEvent() {
+  noInterrupts();
+  char state = Serial.read();
+  if(state == '2')
+    permission = search;
+  else if(state == '1')
+    permission = searchEngage;
+  else if(state == '3')
+    permission = hardKill;
+  else
+    permission = softKill;
+  interrupts();
 }
