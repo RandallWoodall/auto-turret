@@ -272,3 +272,7 @@ void returnToDefault() {
   //This function should return the our direction to the default position.
 }
 
+int checkState() {
+  //Condense the blocks to a single function that returns -1 on hardKill.  Should simplify the loop code.
+}
+
