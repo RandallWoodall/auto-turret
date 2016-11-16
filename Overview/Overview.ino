@@ -6,6 +6,15 @@ volatile int posQuad[];
 volatile int dist[];
 volatile int i = 0;
 
+//Enumeration that will be set in a variable called state -- controlled via bluetooth
+enum btState {
+  hardKill,
+  softKill,
+  search,
+  engage
+};
+
+
 /*Stepper Motor Setup*/
 //.9 degrees per step
 const int stepDir 8;
