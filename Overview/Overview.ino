@@ -144,11 +144,13 @@ void findTarget(){
         }
     }
     /*Loop to return turret to 0 degrees*/
-    digitalWrite(stepDir, 0);                        //Set motor direction
+    /*digitalWrite(stepDir, 0);                        //Set motor direction
     for(j = 0; j < (stepQuad * 6); j++){                         //Step 33 times (30 degrees)
         digitalWrite(stepStp, 1);                    //Take one step
         delay(1);
     }
+    */
+    returnToDefault();
     //Return to main loop
 }
 
@@ -184,9 +186,7 @@ void findDistance(){
 }
 
 void targetConf(){
-    //Return to a resting stat
-    //Wait to recieve bluetooth confirmation
-    //Return to main loop
+    while(state != engage){}//!!Need a better way to do this.
 }
 
 void fire(){
@@ -194,26 +194,55 @@ void fire(){
     int curHorz;
     int curVert;
     for(j = 0; j < i; j++){
+        //For safety in this section, we will be checking the state several times through this whole section.
+        while(state == softKill || state == search) { //We want to be waiting here until we get into the engage state or hardKill.
+          digitalWrite(lasPin, LOW);//Again, just to make sure.
+        }
+        if(state == hardKill) {
+            digitalWrite(lasPin, LOW);//Just to make sure it's off.
+            returnToDefault();//Function not yet implemented.  Will be moving the position back to default.
+            return;
+        }
         curHorz = stepQuad * posQuad[j];
         curHorz += (posX[j] * gridRatHorz * gearRat) / .9; //Steps to take to get to horizontal position
         digitalWrite(stepDir, 1);                          //Set motor direction
         for(j = 0; j < curHorz; j++){                      //Step X times (30 degrees)
+            //We need to run our checks here as well.
+            while(state == softKill || state == search) { //We want to be waiting here until we get into the engage state or hardKill.
+              digitalWrite(lasPin, LOW);//Again, just to make sure.
+            }
+            if(state == hardKill) {
+                digitalWrite(lasPin, LOW);//Just to make sure it's off.
+                returnToDefault();//Function not yet implemented.  Will be moving the position back to default.
+                return;
+            }
             digitalWrite(stepStp, 1);                      //Take one step
             delay(1);
         }
         curVert = posY[j] * gridRatHorz;  //Find elevation
         myservo.write(curVert);           //Adujst elevation
+        //One last check before using the laser.
+        while(state == softKill || state == search) { //We want to be waiting here until we get into the engage state or hardKill.
+          digitalWrite(lasPin, LOW);//Again, just to make sure.
+        }
+        if(state == hardKill) {
+            digitalWrite(lasPin, LOW);//Just to make sure it's off.
+            returnToDefault();//Function not yet implemented.  Will be moving the position back to default.
+            return;
+        }
         /*Toggle laser*/
         digitalWrite(lasPin, HIGH);
         delay(1000);
         digitalWrite(lasPin, LOW);
         /*Reset to default positions*/
-        myservo.write(-curVert);
+        /*myservo.write(-curVert);
         digitalWrite(stepDir, 0);                          //Set motor direction
         for(j = 0; j < curHorz; j++){                      //Step X times (30 degrees)
             digitalWrite(stepStp, 1);                      //Take one step
             delay(1);
         }
+        */
+        returnToDefault();
     }
 }
 
@@ -238,3 +267,8 @@ void serialEvent() {
   }//End switch
   sei();
 }//End serialEvent
+
+void returnToDefault() {
+  //This function should return the our direction to the default position.
+}
+
