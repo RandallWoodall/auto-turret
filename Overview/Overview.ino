@@ -14,16 +14,20 @@ enum btState {
   engage
 };
 
+//State variable
+volatile btState state;
 
 /*Stepper Motor Setup*/
 //.9 degrees per step
 const int stepDir 8;
 const int stepStp 9;
-/*Gear Conversion*/
-double gearRat = 2 / 1;             //Gear rotations per stepper rotations
-double gridRatHorz = 30/930;        //Horizontal grid ratio
-double gridRatVert = 30/1023;       //Vertical grid ratio
-int stepQuad = (30 * gearRat) / .9; //How many steps to turn 30 degrees
+/*Gear Conversion
+ * RW: Switched from integer math to double math to avoid truncation, please advise if this is wrong.
+ */
+double gearRat = 2.0 / 1.0;             //Gear rotations per stepper rotations
+double gridRatHorz = 30.0/930.0;        //Horizontal grid ratio
+double gridRatVert = 30.0/1023.0;       //Vertical grid ratio
+int stepQuad = (int)((30.0 * gearRat) / .9); //How many steps to turn 30 degrees
 
 /*Servo Setup*/
 const int servPin 10;
@@ -48,6 +52,8 @@ void irComm(byte d1, byte d2)
 
 void setup() {
     //Setup up for Bluetooth
+    Serial.begin(9600);
+    state = softKill;
     //Setup for IR
     irSlave = irAddress >> 1;   // This results in 0x21 as the address to pass to TWI
     Wire.begin();
@@ -74,15 +80,15 @@ void setup() {
 }
 
 void loop() {
-    //Wait Here until we recieve a a GO from the bluetooth
-    if(bluetooth == GO){
+    //Wait Here until we get into search or engage state
+    if(state == search || state == engage){
         findTargets();
         findDistance(); /*May want to put this function call in the findTargets() main loop*/
     }
     if(posX[0] != -1){
         //function call targetConf()
     }
-    if(confirmation == 1){
+    if(state == engage){
         //function, fire
     }
     /***********************************************/
@@ -211,3 +217,24 @@ void fire(){
     }
 }
 
+void serialEvent() {
+  cli();
+  switch Serial.read() {
+    case '0':
+      state = hardKill;
+      break;
+    case '1':
+      state = softKill;
+      break;
+    case '2':
+      state = search;
+      break;
+    case '3':
+      state = engage;
+      break;
+    default:
+      state = softKill;
+      break;
+  }//End switch
+  sei();
+}//End serialEvent
