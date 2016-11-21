@@ -19,25 +19,24 @@ volatile btState state;
 
 /*Stepper Motor Setup*/
 //.9 degrees per step
-const int stepDir 8;
-const int stepStp 9;
+const int stepDir = 8;
+const int stepStp = 9;
 /*Gear Conversion
  * RW: Switched from integer math to double math to avoid truncation, please advise if this is wrong.
  */
-double gearRat = 2.0 / 1.0;             //Gear rotations per stepper rotations
 double gridRatHorz = 30.0/930.0;        //Horizontal grid ratio
 double gridRatVert = 30.0/1023.0;       //Vertical grid ratio
-int stepQuad = (int)((30.0 * gearRat) / .9); //How many steps to turn 30 degrees
+int stepQuad = (int)((30.0) / .9); //How many steps to turn 30 degrees
 
 /*Servo Setup*/
 const int servPin;
 volatile int vertPos = 0;
 
 /*Laser Setup*/
-const int lasPin 11;
+const int lasPin = 11;
 /*Optical Sensor pins*/
-const int opTrig 12;
-const int opEcho 13;
+const int opTrig = 12;
+const int opEcho = 13;
 /*IR Contants*/
 const int irAddress = 0xB0;
 volatile int irSlave;

@@ -1,9 +1,11 @@
 #include <Servo.h>
+#include <Stepper.h>
+#include <Wire.h>
 
-volatile int posX[];
-volatile int posY[];
-volatile int posQuad[];
-volatile int dist[];
+volatile int posX[1];
+volatile int posY[1];
+volatile int posQuad[1];
+volatile int dist[1];
 volatile int i = 0;
 
 //Enumeration that will be set in a variable called state -- controlled via bluetooth
@@ -19,28 +21,38 @@ volatile btState state;
 
 /*Stepper Motor Setup*/
 //.9 degrees per step
-const int stepDir 8;
-const int stepStp 9;
+const int stepDir = 8;
+const int stepStp = 9;
+const int stepsPerRevolution = 200;
+Stepper myStepper(stepsPerRevolution, 2, 3, 4, 5);
 /*Gear Conversion
  * RW: Switched from integer math to double math to avoid truncation, please advise if this is wrong.
  */
-double gearRat = 2.0 / 1.0;             //Gear rotations per stepper rotations
 double gridRatHorz = 30.0/930.0;        //Horizontal grid ratio
 double gridRatVert = 30.0/1023.0;       //Vertical grid ratio
-int stepQuad = (int)((30.0 * gearRat) / .9); //How many steps to turn 30 degrees
+int stepQuad = (int)((30.0) / .9); //How many steps to turn 30 degrees
 
 /*Servo Setup*/
-const int servPin 10;
+Servo myservo;
+const int servPin = 10;
 volatile int vertPos = 0;
 
 /*Laser Setup*/
-const int lasPin 11;
+const int lasPin = 11;
 /*Optical Sensor pins*/
-const int opTrig 12;
-const int opEcho 13;
+const int opTrig = 12;
+const int opEcho = 13;
 /*IR Contants*/
 const int irAddress = 0xB0;
 volatile int irSlave;
+
+//Prototypes
+void irComm(byte d1, byte d2);
+void findTargets();
+void findDistance();
+void targetConf();
+void fire();
+int checkState(bool prepFire);
 
 /*Communication Setup for IR Sensor*/
 void irComm(byte d1, byte d2)
@@ -57,18 +69,16 @@ void setup() {
     //Setup for IR
     irSlave = irAddress >> 1;   // This results in 0x21 as the address to pass to TWI
     Wire.begin();
-    Write_2bytes(0x30,0x01); delay(10);
-    Write_2bytes(0x30,0x08); delay(10);
-    Write_2bytes(0x06,0x90); delay(10);
-    Write_2bytes(0x08,0xC0); delay(10);
-    Write_2bytes(0x1A,0x40); delay(10);
-    Write_2bytes(0x33,0x33); delay(10);
+    irComm(0x30,0x01); delay(10);
+    irComm(0x30,0x08); delay(10);
+    irComm(0x06,0x90); delay(10);
+    irComm(0x08,0xC0); delay(10);
+    irComm(0x1A,0x40); delay(10);
+    irComm(0x33,0x33); delay(10);
     delay(100);
     //Setup for Stepper Motor
-    pinMode(stepDir, OUTPUT);
-    pinMode(stepStp, OUTPUT);
-    digitalWrite(stepDir, 0);
-    digitalWrite(stepStp, 0);
+    // set the speed at 60 rpm:
+    myStepper.setSpeed(60);
     //Setup for servo
     myservo.attach(servPin);
     //Setup for Optical
@@ -82,7 +92,7 @@ void setup() {
 void loop() {
     //Wait Here until we get into search or engage state
     if(state == search || state == engage){
-        findTargets();
+        findTarget();
         findDistance(); /*May want to put this function call in the findTargets() main loop*/
     }
     if(posX[0] != -1){
@@ -108,14 +118,14 @@ void findTarget(){
     //Turret to rotate to 6 positions (180 degree covered)
     for(rot = 0; rot < 6; rot++){       //Track 6 rotations
         /*Ready to read IR sensor*/
-        Wire.beginTransmission(slaveAddress);
+        Wire.beginTransmission(irAddress);
         Wire.write(0x36);
         Wire.endTransmission();
  
-        Wire.requestFrom(slaveAddress, 16);        // Request the 2 byte heading (MSB comes first)
+        Wire.requestFrom(irAddress, 16);        // Request the 2 byte heading (MSB comes first)
         /*Clear data buffer*/
         for (i = 0; i < 16; i++){
-           irBuff[i]=0; 
+           irInputx[4]=0; //!!This is out of bounds
         }
         j = 0;
         /*Read in IR values*/
@@ -127,30 +137,15 @@ void findTarget(){
             j++;
             /*END POSSIBLE ERROR*/
         }
-        if(irInputx != (1023 - 93) && irInputy != 1023){ //If target is found in range
-            posX[i] = irInputx;                          //Store x coordinate
-            posY[i] = irInputy;                          //Store y coordinate
+        if(irInputx[i] != (1023 - 93) && irInputy[i] != 1023){ //If target is found in range
+            posX[i] = irInputx[i];                          //Store x coordinate
+            posY[i] = irInputy[i];                          //Store y coordinate
             posQuad[i] = rot;                            //Store quadrant (0 - 5) that the target is in
             i++;                                         //increment number of targets
         }
-        /************************************************************/
-        /*May want to call findDistance here rather than in the loop*/
-        /************************************************************/
-        /*Turn 30 degrees*/
         digitalWrite(stepDir, 1);                        //Set motor direction
-        for(j = 0; j < stepQuad; j++){                   //Step 33 times (30 degrees)
-            digitalWrite(stepStp, 1);                    //Take one step
-            delay(1);
-        }
+        myStepper.step(stepQuad);
     }
-    /*Loop to return turret to 0 degrees*/
-    /*digitalWrite(stepDir, 0);                        //Set motor direction
-    for(j = 0; j < (stepQuad * 6); j++){                         //Step 33 times (30 degrees)
-        digitalWrite(stepStp, 1);                    //Take one step
-        delay(1);
-    }
-    */
-    returnToDefault();
     //Return to main loop
 }
 
@@ -158,15 +153,17 @@ void findDistance(){
     int j;
     int curHorz;
     int curVert;
+    int lastHPos;
+    int lastVPos;
+    
     for(j = 0; j < i; j++){
         curHorz = stepQuad * posQuad[j];
-        curHorz += (posX[j] * gridRatHorz * gearRat) / .9; //Steps to take to get to horizontal position
-        digitalWrite(stepDir, 1);                          //Set motor direction
-        for(j = 0; j < curHorz; j++){                      //Step X times (30 degrees)
-            digitalWrite(stepStp, 1);                      //Take one step
-            delay(1);
-        }
+        curHorz += (posX[j] * gridRatHorz) / .9; //Steps to take to get to horizontal position
+        myStepper.step(curHorz);
         curVert = posY[j] * gridRatHorz;  //Find elevation
+        curVert = curVert - 180;
+        if(curVert < 0)
+            curVert = curVert * -1;
         myservo.write(curVert);           //Adujst elevation
         /*Read distance*/
         digitalWrite(opTrig, LOW);      
@@ -177,12 +174,9 @@ void findDistance(){
         dist[j] = pulseIn(opEcho,HIGH);
         /*Reset to default positions*/
         myservo.write(-curVert);
-        digitalWrite(stepDir, 0);                          //Set motor direction
-        for(j = 0; j < curHorz; j++){                      //Step X times (30 degrees)
-            digitalWrite(stepStp, 1);                      //Take one step
-            delay(1);
-        }
+        myStepper.step(-curHorz);
     }
+    
 }
 
 void targetConf(){
@@ -194,61 +188,29 @@ void fire(){
     int curHorz;
     int curVert;
     for(j = 0; j < i; j++){
-        //For safety in this section, we will be checking the state several times through this whole section.
-        while(state == softKill || state == search) { //We want to be waiting here until we get into the engage state or hardKill.
-          digitalWrite(lasPin, LOW);//Again, just to make sure.
-        }
-        if(state == hardKill) {
-            digitalWrite(lasPin, LOW);//Just to make sure it's off.
-            returnToDefault();//Function not yet implemented.  Will be moving the position back to default.
-            return;
-        }
+        checkState(false); //Need to check return.
         curHorz = stepQuad * posQuad[j];
-        curHorz += (posX[j] * gridRatHorz * gearRat) / .9; //Steps to take to get to horizontal position
-        digitalWrite(stepDir, 1);                          //Set motor direction
-        for(j = 0; j < curHorz; j++){                      //Step X times (30 degrees)
-            //We need to run our checks here as well.
-            while(state == softKill || state == search) { //We want to be waiting here until we get into the engage state or hardKill.
-              digitalWrite(lasPin, LOW);//Again, just to make sure.
-            }
-            if(state == hardKill) {
-                digitalWrite(lasPin, LOW);//Just to make sure it's off.
-                returnToDefault();//Function not yet implemented.  Will be moving the position back to default.
-                return;
-            }
-            digitalWrite(stepStp, 1);                      //Take one step
-            delay(1);
-        }
+        curHorz += (posX[j] * gridRatHorz) / .9; //Steps to take to get to horizontal position
+        myStepper.step(curHorz);
         curVert = posY[j] * gridRatHorz;  //Find elevation
+        curVert = curVert - 180;
+        if(curVert < 0)
+            curVert = curVert * -1;
         myservo.write(curVert);           //Adujst elevation
-        //One last check before using the laser.
-        while(state == softKill || state == search) { //We want to be waiting here until we get into the engage state or hardKill.
-          digitalWrite(lasPin, LOW);//Again, just to make sure.
-        }
-        if(state == hardKill) {
-            digitalWrite(lasPin, LOW);//Just to make sure it's off.
-            returnToDefault();//Function not yet implemented.  Will be moving the position back to default.
-            return;
-        }
+        checkState(true); //Use the return here, as well.
         /*Toggle laser*/
         digitalWrite(lasPin, HIGH);
         delay(1000);
         digitalWrite(lasPin, LOW);
         /*Reset to default positions*/
-        /*myservo.write(-curVert);
-        digitalWrite(stepDir, 0);                          //Set motor direction
-        for(j = 0; j < curHorz; j++){                      //Step X times (30 degrees)
-            digitalWrite(stepStp, 1);                      //Take one step
-            delay(1);
-        }
-        */
-        returnToDefault();
+        myservo.write(-curVert);
+        myStepper.step(-curHorz);
     }
 }
 
 void serialEvent() {
   cli();
-  switch Serial.read() {
+  switch (Serial.read()) {
     case '0':
       state = hardKill;
       break;
@@ -268,11 +230,13 @@ void serialEvent() {
   sei();
 }//End serialEvent
 
-void returnToDefault() {
-  //This function should return the our direction to the default position.
-}
+int checkState(bool prepFire) {
+  //Wait here if we are in softKill.
 
-int checkState() {
-  //Condense the blocks to a single function that returns -1 on hardKill.  Should simplify the loop code.
+  //If we are in a firing function, prepFire should be fed true, if so, wait here unless state = engage
+
+  //If at any point the state becomes hardkill, return -1
+
+  //else return 0.
 }
 
