@@ -232,11 +232,16 @@ void serialEvent() {
 
 int checkState(bool prepFire) {
   //Wait here if we are in softKill.
-
+  while(state=softKill){}
+  
   //If we are in a firing function, prepFire should be fed true, if so, wait here unless state = engage
-
+  while((prepFire==true) && (state!=engage)){}
+  
   //If at any point the state becomes hardkill, return -1
-
+  if(state=hardKill)
+    return(-1);
   //else return 0.
+  else
+    return(0);
 }
 
