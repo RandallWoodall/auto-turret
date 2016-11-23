@@ -2,11 +2,13 @@
 #include <Stepper.h>
 #include <Wire.h>
 
-volatile int posX[1];
-volatile int posY[1];
-volatile int posQuad[1];
-volatile int dist[1];
-volatile int i = 0;
+volatile int posTargX[4];
+volatile int posTargY[4];
+volatile int posQuad[4];
+volatile int dist[4];
+byte data_buf[16];
+volatile int endGame = 0;
+int length = 0;
 
 //Enumeration that will be set in a variable called state -- controlled via bluetooth
 enum btState {
@@ -34,14 +36,16 @@ int stepQuad = (int)((30.0) / .9); //How many steps to turn 30 degrees
 
 /*Servo Setup*/
 Servo myservo;
-const int servPin = 10;
+const int servPin = 9;
 volatile int vertPos = 0;
 
 /*Laser Setup*/
-const int lasPin = 11;
+const int lasPin = 6;
+
 /*Optical Sensor pins*/
-const int opTrig = 12;
-const int opEcho = 13;
+const int opTrig = 8;
+const int opEcho = 7;
+
 /*IR Contants*/
 const int irAddress = 0xB0;
 volatile int irSlave;
@@ -57,8 +61,10 @@ int checkState(bool prepFire);
 /*Communication Setup for IR Sensor*/
 void irComm(byte d1, byte d2)
 {
+    Serial.println(irSlave);
     Wire.beginTransmission(irSlave);
-    Wire.write(d1); Wire.write(d2);
+    Wire.write(d1); 
+    Wire.write(d2);
     Wire.endTransmission();
 }
 
@@ -86,81 +92,138 @@ void setup() {
     pinMode(opEcho, INPUT);
     //Setup for laser
     pinMode(lasPin, OUTPUT);
-    
+    Serial.println("Setup complete.");
 }
 
 void loop() {
     //Wait Here until we get into search or engage state
     if(state == search || state == engage){
+        Serial.println("Made it inside the first if in loop()");
         findTarget();
         findDistance(); /*May want to put this function call in the findTargets() main loop*/
     }
-    if(posX[0] != -1){
+    if(posTargX[0] != -1){
         //function call targetConf()
     }
     if(state == engage){
         //function, fire
     }
-    /***********************************************/
-    /*Clear all Variables, go back to resting state*/
-    /***********************************************/
+    if(endGame == 1){
+      posTargX[length] = -1;
+      posTargY[length] = -1;
+      posQuad[length] = -1;
+      dist[length] = -1;
+    }
+    state = softKill;
 }
 
 void findTarget(){
-    int rot;
+    int s;
     int j;
-    byte irInputx[4];
-    byte irInputy[4];
-    //IR Sensor: 33 degrees horizontal, 23 degrees verticle view range 1023x1023 grid
-    //For grid ignore 93 grid points to the right (makes for perfect 30 degree view range)
-    //0.032258 degrees per horizontal grid point
-    //0.022483 degrees per vertical grid point
-    //Turret to rotate to 6 positions (180 degree covered)
-    for(rot = 0; rot < 6; rot++){       //Track 6 rotations
-        /*Ready to read IR sensor*/
-        Wire.beginTransmission(irAddress);
+    int stepDef = 0;
+    int posX[4];
+    int posY[4];
+    //Target number is 0
+    length = 0;
+  
+    for(j = 0; j < 7; j++) {
+        //Tell the sensor to prepare data for return;
+        Wire.beginTransmission(irSlave);
         Wire.write(0x36);
         Wire.endTransmission();
+  
+        //Request the header.
+        Wire.requestFrom(irSlave, 16);
+        for(int i = 0; i < 16; i++)
+            data_buf[i] = 0;
+            //And the data
+        for(int i = 0; Wire.available() && i < 16; i++)
+            data_buf[i] = Wire.read();
+  
+        //Compile the data.
+        posX[0] = data_buf[1];
+        posY[0] = data_buf[2];
+        s   = data_buf[3];
+        posX[0] += (s & 0x30) <<4;
+        posY[0] += (s & 0xC0) <<2;
+  
+        posX[1] = data_buf[4];
+        posY[1] = data_buf[5];
+        s   = data_buf[6];
+        posX[1] += (s & 0x30) <<4;
+        posY[1] += (s & 0xC0) <<2;
  
-        Wire.requestFrom(irAddress, 16);        // Request the 2 byte heading (MSB comes first)
-        /*Clear data buffer*/
-        for (i = 0; i < 16; i++){
-           irInputx[4]=0; //!!This is out of bounds
+        posX[2] = data_buf[7];
+        posY[2] = data_buf[8];
+        s   = data_buf[9];
+        posX[2] += (s & 0x30) <<4;
+        posY[2] += (s & 0xC0) <<2;
+ 
+        posX[3] = data_buf[10];
+        posY[3] = data_buf[11];
+        s   = data_buf[12];
+        posX[3] += (s & 0x30) <<4;
+        posY[3] += (s & 0xC0) <<2;
+        
+        for(int i = 0; i < 4 && length < 4; i++) {
+            if(posX[i] == 1023) {
+                posX[i] = 0;
+                posY[i] = 0;
+            }
+            else {
+                posTargX[length] = posX[i];
+                posTargY[length] = posY[i];
+                posQuad[length] = j;
+                length++;
+                break;
+            }
         }
-        j = 0;
-        /*Read in IR values*/
-        while(Wire.available() && j < 16) { 
-            irInputx[j] = Wire.read();
-            j++;
-            /*MAY BE ERROR HERE!!!*/
-            irInputy[j] = Wire.read();
-            j++;
-            /*END POSSIBLE ERROR*/
+        //Display the data
+        for(int i=0; i<4; i++) {
+            if (posX[i] < 1000)
+                Serial.print("");
+            if (posX[i] < 100)  
+                Serial.print("");
+            if (posX[i] < 10)  
+                Serial.print("");
+            Serial.print( int(posX[i]) );
+            Serial.print(",");
+            if (posY[i] < 1000)
+                Serial.print("");
+            if (posY[i] < 100)  
+                Serial.print("");
+            if (posY[i] < 10)  
+                Serial.print("");
+            Serial.print( int(posY[i]) );
+            if (i<3)
+                Serial.print(",");
         }
-        if(irInputx[i] != (1023 - 93) && irInputy[i] != 1023){ //If target is found in range
-            posX[i] = irInputx[i];                          //Store x coordinate
-            posY[i] = irInputy[i];                          //Store y coordinate
-            posQuad[i] = rot;                            //Store quadrant (0 - 5) that the target is in
-            i++;                                         //increment number of targets
-        }
-        digitalWrite(stepDir, 1);                        //Set motor direction
+        Serial.println("");
+        delay(1000);
+        //If we have the max number of targets, jump out of the loop.
+        if(length == 4)
+            break;
+        //Go to the next quadrant
         myStepper.step(stepQuad);
+        delay(500);
     }
-    //Return to main loop
+    stepDef = -1 * stepQuad * j;
+    myStepper.step(stepDef);
 }
 
 void findDistance(){
+    Serial.println("GOT IN  FIND DISNATCE");
     int j;
     int curHorz;
     int curVert;
     int lastHPos;
     int lastVPos;
     
-    for(j = 0; j < i; j++){
+    for(j = 0; j < length; j++){
         curHorz = stepQuad * posQuad[j];
-        curHorz += (posX[j] * gridRatHorz) / .9; //Steps to take to get to horizontal position
+        curHorz += (posTargX[j] * gridRatHorz) / .9; //Steps to take to get to horizontal position
         myStepper.step(curHorz);
-        curVert = posY[j] * gridRatHorz;  //Find elevation
+        curVert = posTargY[j] * gridRatHorz;  //Find elevation
         curVert = curVert - 180;
         if(curVert < 0)
             curVert = curVert * -1;
@@ -180,19 +243,22 @@ void findDistance(){
 }
 
 void targetConf(){
+    Serial.println("GOT IN  TARGET CONFIRMATION");
     while(state != engage){}//!!Need a better way to do this.
 }
 
 void fire(){
+    Serial.println("GOT IN  FIRE");
     int j;
+    endGame = 1;
     int curHorz;
     int curVert;
-    for(j = 0; j < i; j++){
+    for(j = 0; j < length; j++){
         checkState(false); //Need to check return.
         curHorz = stepQuad * posQuad[j];
-        curHorz += (posX[j] * gridRatHorz) / .9; //Steps to take to get to horizontal position
+        curHorz += (posTargX[j] * gridRatHorz) / .9; //Steps to take to get to horizontal position
         myStepper.step(curHorz);
-        curVert = posY[j] * gridRatHorz;  //Find elevation
+        curVert = posTargY[j] * gridRatHorz;  //Find elevation
         curVert = curVert - 180;
         if(curVert < 0)
             curVert = curVert * -1;
@@ -244,4 +310,3 @@ int checkState(bool prepFire) {
   else
     return(0);
 }
-
