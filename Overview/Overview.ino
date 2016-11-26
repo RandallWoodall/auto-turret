@@ -8,7 +8,7 @@ volatile int posQuad[4];
 volatile int dist[4];
 byte data_buf[16];
 volatile int endGame = 0;
-int length = 0;
+int targets = 0;
 
 //Enumeration that will be set in a variable called state -- controlled via bluetooth
 enum btState {
@@ -31,7 +31,7 @@ Stepper myStepper(stepsPerRevolution, 2, 3, 4, 5);
  * RW: Switched from integer math to double math to avoid truncation, please advise if this is wrong.
  */
 double gridRatHorz = 30.0/930.0;        //Horizontal grid ratio
-double gridRatVert = 30.0/1023.0;       //Vertical grid ratio
+double gridRatVert = 23.0/1023.0;       //Vertical grid ratio
 int stepQuad = (int)((30.0) / .9); //How many steps to turn 30 degrees
 
 /*Servo Setup*/
@@ -93,6 +93,17 @@ void setup() {
     //Setup for laser
     pinMode(lasPin, OUTPUT);
     Serial.println("Setup complete.");
+    //Set all Global Position variables to -1
+    for(int i = 0; i < 4; i++){
+        Serial.print("Run Number: ");
+        Serial.println(i);
+        posTargX[i] = -1;
+        posTargY[i] = -1;
+        posQuad[i] = -1;
+        dist[i] = -1;
+    }
+    //Set servo to default state
+    myservo.write(0);
 }
 
 void loop() {
@@ -103,16 +114,18 @@ void loop() {
         findDistance(); /*May want to put this function call in the findTargets() main loop*/
     }
     if(posTargX[0] != -1){
-        //function call targetConf()
+        targetConf();
     }
     if(state == engage){
-        //function, fire
+        fire();
     }
     if(endGame == 1){
-      posTargX[length] = -1;
-      posTargY[length] = -1;
-      posQuad[length] = -1;
-      dist[length] = -1;
+      for(int i = 0; i < targets; i++){
+        posTargX[i] = -1;
+        posTargY[i] = -1;
+        posQuad[i] = -1;
+        dist[i] = -1;
+      }
     }
     state = softKill;
 }
@@ -124,7 +137,7 @@ void findTarget(){
     int posX[4];
     int posY[4];
     //Target number is 0
-    length = 0;
+    targets = 0;
   
     for(j = 0; j < 7; j++) {
         //Tell the sensor to prepare data for return;
@@ -165,16 +178,16 @@ void findTarget(){
         posX[3] += (s & 0x30) <<4;
         posY[3] += (s & 0xC0) <<2;
         
-        for(int i = 0; i < 4 && length < 4; i++) {
+        for(int i = 0; i < 4 && targets < 4; i++) {
             if(posX[i] == 1023) {
                 posX[i] = 0;
                 posY[i] = 0;
             }
             else {
-                posTargX[length] = posX[i];
-                posTargY[length] = posY[i];
-                posQuad[length] = j;
-                length++;
+                posTargX[targets] = posX[i];
+                posTargY[targets] = posY[i];
+                posQuad[targets] = j;
+                targets++;
                 break;
             }
         }
@@ -201,7 +214,7 @@ void findTarget(){
         Serial.println("");
         delay(1000);
         //If we have the max number of targets, jump out of the loop.
-        if(length == 4)
+        if(targets == 4)
             break;
         //Go to the next quadrant
         myStepper.step(stepQuad);
@@ -212,19 +225,19 @@ void findTarget(){
 }
 
 void findDistance(){
-    Serial.println("GOT IN  FIND DISNATCE");
+    Serial.println("GOT IN  FIND DISTANCE");
     int j;
     int curHorz;
     int curVert;
     int lastHPos;
     int lastVPos;
     
-    for(j = 0; j < length; j++){
+    for(j = 0; j < targets; j++){
         curHorz = stepQuad * posQuad[j];
         curHorz += (posTargX[j] * gridRatHorz) / .9; //Steps to take to get to horizontal position
         myStepper.step(curHorz);
-        curVert = posTargY[j] * gridRatHorz;  //Find elevation
-        curVert = curVert - 180;
+        curVert = posTargY[j] * gridRatVert + 50;  //Find elevation
+        Serial.println(curVert);
         if(curVert < 0)
             curVert = curVert * -1;
         myservo.write(curVert);           //Adujst elevation
@@ -235,8 +248,13 @@ void findDistance(){
         delayMicroseconds(10);
         digitalWrite(opTrig, LOW);
         dist[j] = pulseIn(opEcho,HIGH);
+        Serial.print("Distance to target #");
+        Serial.print(j);
+        Serial.print(": ");
+        Serial.println(dist[j]);
+        delay(1000);
         /*Reset to default positions*/
-        myservo.write(-curVert);
+        myservo.write(0);
         myStepper.step(-curHorz);
     }
     
@@ -244,32 +262,48 @@ void findDistance(){
 
 void targetConf(){
     Serial.println("GOT IN  TARGET CONFIRMATION");
-    while(state != engage){}//!!Need a better way to do this.
+    /********************************************/
+    /*****WE ARE GETTING STUCK IN THIS LOOP!*****/
+    /********************************************/
+    /*
+    while(state != engage){
+        Serial.println("OH MY GOD IM STUCK!!!");
+    }//!!Need a better way to do this.
+    */
+    /*TESTSING CALL*/
+    fire();
 }
 
 void fire(){
-    Serial.println("GOT IN  FIRE");
+    Serial.println("GOT INTO FIRE");
     int j;
     endGame = 1;
     int curHorz;
     int curVert;
-    for(j = 0; j < length; j++){
+    for(j = 0; j < targets; j++){
         checkState(false); //Need to check return.
         curHorz = stepQuad * posQuad[j];
         curHorz += (posTargX[j] * gridRatHorz) / .9; //Steps to take to get to horizontal position
         myStepper.step(curHorz);
-        curVert = posTargY[j] * gridRatHorz;  //Find elevation
-        curVert = curVert - 180;
+        curVert = posTargY[j] * gridRatHorz + 50;  //Find elevation
+        /*
         if(curVert < 0)
             curVert = curVert * -1;
+        */
         myservo.write(curVert);           //Adujst elevation
+        /*GETTING STUCK HERE
+        Serial.println("Got to the check");
         checkState(true); //Use the return here, as well.
+        Serial.println("Got past the check");
+        */
         /*Toggle laser*/
+        Serial.println("FIRING");
         digitalWrite(lasPin, HIGH);
         delay(1000);
         digitalWrite(lasPin, LOW);
         /*Reset to default positions*/
-        myservo.write(-curVert);
+        delay(1000);
+        myservo.write(0);
         myStepper.step(-curHorz);
     }
 }
