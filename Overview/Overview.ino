@@ -72,6 +72,7 @@ void setup() {
     //Setup up for Bluetooth
     Serial.begin(9600);
     state = softKill;
+    Serial.flush();
     //Setup for IR
     irSlave = irAddress >> 1;   // This results in 0x21 as the address to pass to TWI
     Wire.begin();
@@ -109,14 +110,14 @@ void setup() {
 void loop() {
     //Wait Here until we get into search or engage state
     if(state == search || state == engage){
-        Serial.println("Made it inside the first if in loop()");
         findTarget();
-        findDistance(); /*May want to put this function call in the findTargets() main loop*/
+        findDistance();
     }
     if(posTargX[0] != -1){
         targetConf();
     }
-    if(state == engage){
+    if(state == engage && posTargX[0] != -1){
+        Serial.println("Made it here.");
         fire();
     }
     if(endGame == 1){
@@ -126,8 +127,10 @@ void loop() {
         posQuad[i] = -1;
         dist[i] = -1;
       }
+      state = softKill;
+      endGame = 0;
+      Serial.println("TADAAA!!!");
     }
-    state = softKill;
 }
 
 void findTarget(){
@@ -262,16 +265,9 @@ void findDistance(){
 
 void targetConf(){
     Serial.println("GOT IN  TARGET CONFIRMATION");
-    /********************************************/
-    /*****WE ARE GETTING STUCK IN THIS LOOP!*****/
-    /********************************************/
-    /*
     while(state != engage){
-        Serial.println("OH MY GOD IM STUCK!!!");
-    }//!!Need a better way to do this.
-    */
-    /*TESTSING CALL*/
-    fire();
+        serialEvent();
+    }
 }
 
 void fire(){
@@ -281,7 +277,8 @@ void fire(){
     int curHorz;
     int curVert;
     for(j = 0; j < targets; j++){
-        checkState(false); //Need to check return.
+        if(checkState(false) == -1)
+            return;
         curHorz = stepQuad * posQuad[j];
         curHorz += (posTargX[j] * gridRatHorz) / .9; //Steps to take to get to horizontal position
         myStepper.step(curHorz);
@@ -291,11 +288,10 @@ void fire(){
             curVert = curVert * -1;
         */
         myservo.write(curVert);           //Adujst elevation
-        /*GETTING STUCK HERE
         Serial.println("Got to the check");
-        checkState(true); //Use the return here, as well.
+        if(checkState(true) == -1)
+            return;
         Serial.println("Got past the check");
-        */
         /*Toggle laser*/
         Serial.println("FIRING");
         digitalWrite(lasPin, HIGH);
@@ -309,7 +305,8 @@ void fire(){
 }
 
 void serialEvent() {
-  cli();
+  if(Serial.available() != true)
+    return;
   switch (Serial.read()) {
     case '0':
       state = hardKill;
@@ -327,20 +324,25 @@ void serialEvent() {
       state = softKill;
       break;
   }//End switch
-  sei();
 }//End serialEvent
 
 int checkState(bool prepFire) {
-  //Wait here if we are in softKill.
-  while(state==softKill){}
-  
-  //If we are in a firing function, prepFire should be fed true, if so, wait here unless state = engage
-  while((prepFire==true) && (state!=engage)){}
-  
-  //If at any point the state becomes hardkill, return -1
+  serialEvent();
   if(state==hardKill)
     return(-1);
-  //else return 0.
-  else
-    return(0);
+  //Wait here if we are in softKill.
+  while(state==softKill){
+    serialEvent();
+    if(state==hardKill)
+      return(-1);
+  }
+  
+  //If we are in a firing function, prepFire should be fed true, if so, wait here unless state = engage
+  while((prepFire==true) && (state!=engage)){
+    serialEvent();
+    if(state==hardKill)
+      return(-1);
+  }
+  
+  return(0);
 }
